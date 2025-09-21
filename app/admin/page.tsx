@@ -3,26 +3,24 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { 
-  Settings, 
   RotateCcw, 
   Play, 
   Pause, 
   Clock, 
-  Database,
-  Globe,
   Activity,
   AlertTriangle,
   CheckCircle,
   Zap,
-  DollarSign,
+  Server,
+  Database,
+  Globe,
+  Timer,
   TrendingUp,
-  TrendingDown
+  TrendingDown,
+  RefreshCw
 } from 'lucide-react'
 
 interface GlobalTimerState {
@@ -34,53 +32,72 @@ interface GlobalTimerState {
 }
 
 interface AdminStats {
-  connectedClients: number
-  totalResets: number
-  lastReset: number | null
-  uptime: number
+  timer: GlobalTimerState
+  monitoring: {
+    mode: string
+    currentInterval: number
+    currentCost: number
+    minCost: number
+    maxCost: number
+    range: string
+    lastTrade: string
+    consecutiveErrors: number
+  } | null
+  services: {
+    timerService: {
+      status: string
+      url: string
+    }
+    monitorService: {
+      status: string
+      url: string
+    }
+  }
+}
+
+interface HealthStatus {
+  status: string
+  timestamp: number
   instanceId: string
-  activeInstances: number
-  redisAvailable: boolean
-}
-
-interface MonitoringConfig {
-  pollingMode: 'conservative' | 'balanced' | 'aggressive' | 'ultra'
-  webhookMode: boolean
-  webhookUrl: string
-  heliusApiKey: string
-}
-
-interface CostStats {
-  mode: string
-  currentInterval: number
-  currentCost: number
-  minCost: number
-  maxCost: number
-  range: string
-  lastTrade: string | null
-  consecutiveErrors: number
+  services: {
+    timer: {
+      status: string
+      url: string
+      instanceId: string
+      redisAvailable: boolean
+    }
+    monitor: {
+      status: string
+      url: string
+      tokenAddress: string
+      isMonitoring: boolean
+      webhookMode: boolean
+    }
+    redis: {
+      status: string
+      url?: string
+    }
+    solana: {
+      status: string
+      endpoint: string
+    }
+  }
+  environment: {
+    nodeEnv: string
+    redisAvailable: boolean
+    heliusApiKey: boolean
+    architecture: string
+  }
 }
 
 export default function AdminPage() {
   const [timerState, setTimerState] = useState<GlobalTimerState | null>(null)
   const [adminStats, setAdminStats] = useState<AdminStats | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [settings, setSettings] = useState({
-    tokenAddress: '9VxExA1iRPbuLLdSJ2rB3nyBxsyLReT4aqzZBMaBaY1p',
-    timerDuration: 10,
-    pollingInterval: 3,
-    isMonitoring: true
-  })
-  const [monitoringConfig, setMonitoringConfig] = useState<MonitoringConfig>({
-    pollingMode: 'balanced',
-    webhookMode: false,
-    webhookUrl: '',
-    heliusApiKey: ''
-  })
-  const [costStats, setCostStats] = useState<CostStats | null>(null)
-  const [healthStatus, setHealthStatus] = useState<any>(null)
+  const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null)
+  const [isMonitoring, setIsMonitoring] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
 
-  // Fetch current timer state
+  // Fetch timer state
   const fetchTimerState = async () => {
     try {
       const response = await fetch('/api/timer')
@@ -93,13 +110,14 @@ export default function AdminPage() {
     }
   }
 
-  // Fetch admin statistics
+  // Fetch admin stats
   const fetchAdminStats = async () => {
     try {
       const response = await fetch('/api/admin/stats')
       const data = await response.json()
       if (data.success) {
         setAdminStats(data.data)
+        setIsMonitoring(data.data.monitoring?.lastTrade ? true : false)
       }
     } catch (error) {
       console.error('Error fetching admin stats:', error)
@@ -117,25 +135,9 @@ export default function AdminPage() {
     }
   }
 
-  // Update settings
-  const updateSettings = async () => {
-    try {
-      const response = await fetch('/api/admin/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
-      })
-      const data = await response.json()
-      if (data.success) {
-        alert('Settings updated successfully!')
-      }
-    } catch (error) {
-      console.error('Error updating settings:', error)
-    }
-  }
-
   // Manual timer reset
   const resetTimer = async () => {
+    setIsLoading(true)
     try {
       const response = await fetch('/api/timer', {
         method: 'POST',
@@ -145,352 +147,173 @@ export default function AdminPage() {
       const data = await response.json()
       if (data.success) {
         await fetchTimerState()
-        alert('Timer reset successfully!')
+        await fetchAdminStats()
       }
     } catch (error) {
       console.error('Error resetting timer:', error)
+    } finally {
+      setIsLoading(false)
     }
   }
 
   // Toggle monitoring
   const toggleMonitoring = async () => {
+    setIsLoading(true)
     try {
       const response = await fetch('/api/admin/monitoring', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !settings.isMonitoring })
+        body: JSON.stringify({ enabled: !isMonitoring })
       })
       const data = await response.json()
       if (data.success) {
-        setSettings(prev => ({ ...prev, isMonitoring: !prev.isMonitoring }))
+        setIsMonitoring(!isMonitoring)
+        await fetchAdminStats()
       }
     } catch (error) {
       console.error('Error toggling monitoring:', error)
+    } finally {
+      setIsLoading(false)
     }
   }
 
-  // Fetch monitoring cost stats
-  const fetchCostStats = async () => {
-    try {
-      const response = await fetch('/api/admin/monitoring/stats')
-      const data = await response.json()
-      if (data.success) {
-        setCostStats(data.data)
-      }
-    } catch (error) {
-      console.error('Error fetching cost stats:', error)
-    }
-  }
-
-  // Update monitoring configuration
-  const updateMonitoringConfig = async () => {
-    try {
-      const response = await fetch('/api/admin/monitoring/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(monitoringConfig)
-      })
-      const data = await response.json()
-      if (data.success) {
-        alert('Monitoring configuration updated successfully!')
-        await fetchCostStats()
-      }
-    } catch (error) {
-      console.error('Error updating monitoring config:', error)
-    }
-  }
-
-  // Set polling speed
-  const setPollingSpeed = async (mode: 'conservative' | 'balanced' | 'aggressive' | 'ultra') => {
-    try {
-      const response = await fetch('/api/admin/monitoring/speed', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode })
-      })
-      const data = await response.json()
-      if (data.success) {
-        setMonitoringConfig(prev => ({ ...prev, pollingMode: mode }))
-        await fetchCostStats()
-        alert(`Polling speed set to ${mode} mode!`)
-      }
-    } catch (error) {
-      console.error('Error setting polling speed:', error)
-    }
-  }
-
-  useEffect(() => {
-    fetchTimerState()
-    fetchAdminStats()
-    fetchHealthStatus()
-    fetchCostStats()
+  // Refresh all data
+  const refreshAll = async () => {
+    setIsLoading(true)
+    await Promise.all([
+      fetchTimerState(),
+      fetchAdminStats(),
+      fetchHealthStatus()
+    ])
     setIsLoading(false)
+  }
 
-    // Refresh every 5 seconds
+  // Auto-refresh every 5 seconds
+  useEffect(() => {
     const interval = setInterval(() => {
       fetchTimerState()
       fetchAdminStats()
-      fetchHealthStatus()
-      fetchCostStats()
     }, 5000)
+
+    // Initial load
+    refreshAll()
 
     return () => clearInterval(interval)
   }, [])
 
-  const formatTime = (timestamp: number) => {
-    return new Date(timestamp).toLocaleString()
-  }
-
-  const formatDuration = (ms: number) => {
-    const minutes = Math.floor(ms / 60000)
-    const seconds = Math.floor((ms % 60000) / 1000)
+  const formatTime = (milliseconds: number) => {
+    const minutes = Math.floor(milliseconds / 60000)
+    const seconds = Math.floor((milliseconds % 60000) / 1000)
     return `${minutes}:${seconds.toString().padStart(2, '0')}`
   }
 
   const getTimeLeft = () => {
     if (!timerState) return 0
-    const elapsed = timerState.serverTime - timerState.startTime
+    const elapsed = Date.now() - timerState.startTime
     return Math.max(0, timerState.duration - elapsed)
   }
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 flex items-center justify-center">
-        <div className="text-white text-xl">Loading admin panel...</div>
-      </div>
-    )
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'healthy': return 'text-green-400'
+      case 'unhealthy': return 'text-red-400'
+      case 'degraded': return 'text-yellow-400'
+      default: return 'text-gray-400'
+    }
+  }
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'healthy': return 'default'
+      case 'unhealthy': return 'destructive'
+      case 'degraded': return 'secondary'
+      default: return 'outline'
+    }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 p-6">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-6">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
-            <Settings className="w-8 h-8" />
-            Global Timer Admin Panel
-          </h1>
-          <p className="text-gray-300">Manage the global timer system and monitor blockchain activity</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl font-bold text-white mb-2">System Dashboard</h1>
+              <p className="text-gray-300">Separate Services Architecture - Real-time Monitoring</p>
+            </div>
+            <Button 
+              onClick={refreshAll} 
+              disabled={isLoading}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+              Refresh All
+            </Button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-          {/* Timer Status */}
-          <Card className="border-white/20 p-6 bg-black/20 backdrop-blur-md">
-            <div className="flex items-center gap-3 mb-4">
-              <Clock className="w-6 h-6 text-blue-400" />
-              <h2 className="text-xl font-semibold text-white">Timer Status</h2>
-            </div>
-            
-            {timerState && (
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Status:</span>
-                  <Badge variant={timerState.isActive ? "default" : "destructive"}>
-                    {timerState.isActive ? "Active" : "Expired"}
-                  </Badge>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Time Left:</span>
-                  <span className="text-2xl font-mono text-green-400">
-                    {formatDuration(getTimeLeft())}
-                  </span>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Started:</span>
-                  <span className="text-sm text-gray-400">
-                    {formatTime(timerState.startTime)}
-                  </span>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Last Reset:</span>
-                  <span className="text-sm text-gray-400">
-                    {timerState.lastSwapTime ? formatTime(timerState.lastSwapTime) : 'Never'}
-                  </span>
-                </div>
-                
-                <Separator className="bg-white/10" />
-                
-                <div className="flex gap-2">
-                  <Button onClick={resetTimer} className="flex-1" variant="outline">
-                    <RotateCcw className="w-4 h-4 mr-2" />
-                    Reset Timer
-                  </Button>
-                </div>
+        {/* Main Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* Timer Status - Large Card */}
+          <div className="lg:col-span-2">
+            <Card className="border-white/20 p-6 bg-black/20 backdrop-blur-md">
+              <div className="flex items-center gap-3 mb-6">
+                <Timer className="w-8 h-8 text-blue-400" />
+                <h2 className="text-2xl font-semibold text-white">Global Timer</h2>
               </div>
-            )}
-          </Card>
+              
+              {timerState && (
+                <div className="space-y-6">
+                  {/* Timer Display */}
+                  <div className="text-center">
+                    <div className="text-6xl font-bold text-white mb-2">
+                      {formatTime(getTimeLeft())}
+                    </div>
+                    <Badge 
+                      variant={timerState.isActive ? "default" : "secondary"}
+                      className="text-lg px-4 py-2"
+                    >
+                      {timerState.isActive ? "Active" : "Inactive"}
+                    </Badge>
+                  </div>
 
-          {/* System Stats */}
-          <Card className="border-white/20 p-6 bg-black/20 backdrop-blur-md">
-            <div className="flex items-center gap-3 mb-4">
-              <Activity className="w-6 h-6 text-green-400" />
-              <h2 className="text-xl font-semibold text-white">System Statistics</h2>
-            </div>
-            
-            {adminStats && (
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Connected Clients:</span>
-                  <Badge variant="outline" className="text-green-400">
-                    {adminStats.connectedClients}
-                  </Badge>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Total Resets:</span>
-                  <span className="text-white font-semibold">
-                    {adminStats.totalResets}
-                  </span>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Uptime:</span>
-                  <span className="text-sm text-gray-400">
-                    {formatDuration(adminStats.uptime)}
-                  </span>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Last Reset:</span>
-                  <span className="text-sm text-gray-400">
-                    {adminStats.lastReset ? formatTime(adminStats.lastReset) : 'Never'}
-                  </span>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Instance ID:</span>
-                  <span className="text-sm text-gray-400">
-                    {adminStats.instanceId}
-                  </span>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Active Instances:</span>
-                  <Badge variant="outline" className="text-blue-400">
-                    {adminStats.activeInstances}
-                  </Badge>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Redis Status:</span>
-                  <Badge variant={adminStats.redisAvailable ? "default" : "destructive"}>
-                    {adminStats.redisAvailable ? "Connected" : "In-Memory"}
-                  </Badge>
-                </div>
-              </div>
-            )}
-          </Card>
+                  {/* Timer Info */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-white/5 rounded-lg p-4">
+                      <div className="text-sm text-gray-400 mb-1">Started</div>
+                      <div className="text-white font-medium">
+                        {new Date(timerState.startTime).toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="bg-white/5 rounded-lg p-4">
+                      <div className="text-sm text-gray-400 mb-1">Last Reset</div>
+                      <div className="text-white font-medium">
+                        {timerState.lastSwapTime 
+                          ? new Date(timerState.lastSwapTime).toLocaleString()
+                          : 'Never'
+                        }
+                      </div>
+                    </div>
+                  </div>
 
-          {/* Configuration Settings */}
-          <Card className="border-white/20 p-6 bg-black/20 backdrop-blur-md">
-            <div className="flex items-center gap-3 mb-4">
-              <Database className="w-6 h-6 text-purple-400" />
-              <h2 className="text-xl font-semibold text-white">Configuration</h2>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="tokenAddress" className="text-gray-300">Token Address to Monitor</Label>
-                <Input
-                  id="tokenAddress"
-                  value={settings.tokenAddress}
-                  onChange={(e) => setSettings(prev => ({ ...prev, tokenAddress: e.target.value }))}
-                  className="mt-1 bg-black/20 border-white/20 text-white"
-                  placeholder="Enter Solana token mint address"
-                />
-              </div>
-              
-              <div>
-                <Label htmlFor="timerDuration" className="text-gray-300">Timer Duration (minutes)</Label>
-                <Input
-                  id="timerDuration"
-                  type="number"
-                  value={settings.timerDuration}
-                  onChange={(e) => setSettings(prev => ({ ...prev, timerDuration: parseInt(e.target.value) }))}
-                  className="mt-1 bg-black/20 border-white/20 text-white"
-                  min="1"
-                  max="60"
-                />
-              </div>
-              
-              <div>
-                <Label htmlFor="pollingInterval" className="text-gray-300">Blockchain Polling Interval (seconds)</Label>
-                <Input
-                  id="pollingInterval"
-                  type="number"
-                  value={settings.pollingInterval}
-                  onChange={(e) => setSettings(prev => ({ ...prev, pollingInterval: parseInt(e.target.value) }))}
-                  className="mt-1 bg-black/20 border-white/20 text-white"
-                  min="1"
-                  max="30"
-                />
-              </div>
-              
-              <div className="flex items-center justify-between">
-                <Label htmlFor="monitoring" className="text-gray-300">Blockchain Monitoring</Label>
-                <Switch
-                  id="monitoring"
-                  checked={settings.isMonitoring}
-                  onCheckedChange={toggleMonitoring}
-                />
-              </div>
-              
-              <Button onClick={updateSettings} className="w-full">
-                <Settings className="w-4 h-4 mr-2" />
-                Update Settings
-              </Button>
-            </div>
-          </Card>
-
-          {/* Monitoring Status */}
-          <Card className="border-white/20 p-6 bg-black/20 backdrop-blur-md">
-            <div className="flex items-center gap-3 mb-4">
-              <Globe className="w-6 h-6 text-yellow-400" />
-              <h2 className="text-xl font-semibold text-white">Monitoring Status</h2>
-            </div>
-            
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-gray-300">Blockchain Monitoring:</span>
-                <div className="flex items-center gap-2">
-                  {settings.isMonitoring ? (
-                    <CheckCircle className="w-5 h-5 text-green-400" />
-                  ) : (
-                    <AlertTriangle className="w-5 h-5 text-red-400" />
-                  )}
-                  <Badge variant={settings.isMonitoring ? "default" : "destructive"}>
-                    {settings.isMonitoring ? "Active" : "Disabled"}
-                  </Badge>
+                  {/* Actions */}
+                  <div className="flex gap-3">
+                    <Button 
+                      onClick={resetTimer} 
+                      disabled={isLoading}
+                      className="flex-1 bg-red-600 hover:bg-red-700"
+                    >
+                      <RotateCcw className="w-4 h-4 mr-2" />
+                      Reset Timer
+                    </Button>
+                  </div>
                 </div>
-              </div>
-              
-              <div className="flex justify-between items-center">
-                <span className="text-gray-300">Current Token:</span>
-                <code className="text-xs bg-black/40 px-2 py-1 rounded text-gray-300">
-                  {settings.tokenAddress.slice(0, 8)}...{settings.tokenAddress.slice(-8)}
-                </code>
-              </div>
-              
-              <div className="flex justify-between items-center">
-                <span className="text-gray-300">Polling Frequency:</span>
-                <span className="text-white">
-                  Every {settings.pollingInterval}s
-                </span>
-              </div>
-              
-              <div className="flex justify-between items-center">
-                <span className="text-gray-300">Timer Duration:</span>
-                <span className="text-white">
-                  {settings.timerDuration} minutes
-                </span>
-              </div>
-            </div>
-          </Card>
+              )}
+            </Card>
+          </div>
 
-          {/* Health Status */}
+          {/* System Health */}
           <Card className="border-white/20 p-6 bg-black/20 backdrop-blur-md">
             <div className="flex items-center gap-3 mb-4">
               <Activity className="w-6 h-6 text-green-400" />
@@ -500,181 +323,228 @@ export default function AdminPage() {
             {healthStatus && (
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Overall Status:</span>
-                  <Badge variant={healthStatus.status === 'healthy' ? "default" : "destructive"}>
+                  <span className="text-gray-300">Overall Status</span>
+                  <Badge variant={getStatusBadge(healthStatus.status)}>
                     {healthStatus.status}
-                  </Badge>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Timer Service:</span>
-                  <Badge variant={healthStatus.services.timer.status === 'healthy' ? "default" : "destructive"}>
-                    {healthStatus.services.timer.status}
-                  </Badge>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Redis:</span>
-                  <Badge variant={healthStatus.services.redis.status === 'healthy' ? "default" : "destructive"}>
-                    {healthStatus.services.redis.status}
-                  </Badge>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Solana RPC:</span>
-                  <Badge variant={healthStatus.services.solana.status === 'healthy' ? "default" : "destructive"}>
-                    {healthStatus.services.solana.status}
                   </Badge>
                 </div>
                 
                 <Separator className="bg-white/10" />
                 
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Environment:</span>
-                  <span className="text-sm text-gray-400">
-                    {healthStatus.environment.nodeEnv}
-                  </span>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-300">Instance ID:</span>
-                  <span className="text-sm text-gray-400">
-                    {healthStatus.instanceId}
-                  </span>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-300">Timer Service</span>
+                    <Badge variant={getStatusBadge(healthStatus.services.timer.status)}>
+                      {healthStatus.services.timer.status}
+                    </Badge>
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-300">Monitor Service</span>
+                    <Badge variant={getStatusBadge(healthStatus.services.monitor.status)}>
+                      {healthStatus.services.monitor.status}
+                    </Badge>
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-300">Redis</span>
+                    <Badge variant={getStatusBadge(healthStatus.services.redis.status)}>
+                      {healthStatus.services.redis.status}
+                    </Badge>
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-300">Solana RPC</span>
+                    <Badge variant={getStatusBadge(healthStatus.services.solana.status)}>
+                      {healthStatus.services.solana.status}
+                    </Badge>
+                  </div>
                 </div>
               </div>
             )}
           </Card>
 
-          {/* Monitoring Configuration */}
+          {/* Service Status */}
           <Card className="border-white/20 p-6 bg-black/20 backdrop-blur-md">
             <div className="flex items-center gap-3 mb-4">
-              <Zap className="w-6 h-6 text-yellow-400" />
-              <h2 className="text-xl font-semibold text-white">Monitoring Configuration</h2>
+              <Server className="w-6 h-6 text-cyan-400" />
+              <h2 className="text-xl font-semibold text-white">Service Status</h2>
+            </div>
+            
+            {adminStats?.services && (
+              <div className="space-y-4">
+                <div className="space-y-3">
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-white">Timer Service</span>
+                      <Badge variant={getStatusBadge(adminStats.services.timerService.status)}>
+                        {adminStats.services.timerService.status}
+                      </Badge>
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {adminStats.services.timerService.url}
+                    </div>
+                  </div>
+                  
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-white">Monitor Service</span>
+                      <Badge variant={getStatusBadge(adminStats.services.monitorService.status)}>
+                        {adminStats.services.monitorService.status}
+                      </Badge>
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {adminStats.services.monitorService.url}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Card>
+
+          {/* Monitoring Control */}
+          <Card className="border-white/20 p-6 bg-black/20 backdrop-blur-md">
+            <div className="flex items-center gap-3 mb-4">
+              <Globe className="w-6 h-6 text-yellow-400" />
+              <h2 className="text-xl font-semibold text-white">Blockchain Monitoring</h2>
             </div>
             
             <div className="space-y-4">
-              {/* Polling Speed Modes */}
-              <div>
-                <Label className="text-gray-300 mb-2 block">Polling Speed Mode</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { mode: 'conservative', label: 'Conservative', icon: TrendingDown, color: 'text-green-400' },
-                    { mode: 'balanced', label: 'Balanced', icon: TrendingUp, color: 'text-blue-400' },
-                    { mode: 'aggressive', label: 'Aggressive', icon: Zap, color: 'text-yellow-400' },
-                    { mode: 'ultra', label: 'Ultra', icon: DollarSign, color: 'text-red-400' }
-                  ].map(({ mode, label, icon: Icon, color }) => (
-                    <Button
-                      key={mode}
-                      variant={monitoringConfig.pollingMode === mode ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setPollingSpeed(mode as any)}
-                      className="flex items-center gap-2"
-                    >
-                      <Icon className={`w-4 h-4 ${color}`} />
-                      {label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Cost Information */}
-              {costStats && (
-                <div className="space-y-3">
-                  <Separator className="bg-white/10" />
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-300">Current Mode:</span>
-                    <Badge variant="outline" className="text-blue-400">
-                      {costStats.mode}
-                    </Badge>
-                  </div>
-                  
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-300">Current Interval:</span>
-                    <span className="text-white">
-                      {costStats.currentInterval}s
-                    </span>
-                  </div>
-                  
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-300">Current Cost:</span>
-                    <span className="text-green-400 font-semibold">
-                      {costStats.currentCost} credits/hour
-                    </span>
-                  </div>
-                  
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-300">Cost Range:</span>
-                    <span className="text-sm text-gray-400">
-                      {costStats.minCost} - {costStats.maxCost} credits/hour
-                    </span>
-                  </div>
-                  
-                  {costStats.lastTrade && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-300">Last Trade:</span>
-                      <span className="text-sm text-gray-400">
-                        {new Date(costStats.lastTrade).toLocaleTimeString()}
-                      </span>
-                    </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-300">Status</span>
+                <div className="flex items-center gap-2">
+                  {isMonitoring ? (
+                    <CheckCircle className="w-5 h-5 text-green-400" />
+                  ) : (
+                    <AlertTriangle className="w-5 h-5 text-red-400" />
                   )}
-                  
-                  {costStats.consecutiveErrors > 0 && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-300">Consecutive Errors:</span>
-                      <Badge variant="destructive">
-                        {costStats.consecutiveErrors}
-                      </Badge>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Webhook Configuration */}
-              <Separator className="bg-white/10" />
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label className="text-gray-300">Webhook Mode</Label>
-                  <Switch
-                    checked={monitoringConfig.webhookMode}
-                    onCheckedChange={(checked) => 
-                      setMonitoringConfig(prev => ({ ...prev, webhookMode: checked }))
-                    }
-                  />
-                </div>
-                
-                {monitoringConfig.webhookMode && (
-                  <div>
-                    <Label htmlFor="webhookUrl" className="text-gray-300">Webhook URL</Label>
-                    <Input
-                      id="webhookUrl"
-                      value={monitoringConfig.webhookUrl}
-                      onChange={(e) => setMonitoringConfig(prev => ({ ...prev, webhookUrl: e.target.value }))}
-                      className="mt-1 bg-black/20 border-white/20 text-white"
-                      placeholder="https://yourdomain.com/api/webhook/helius"
-                    />
-                  </div>
-                )}
-                
-                <div>
-                  <Label htmlFor="heliusApiKey" className="text-gray-300">Helius API Key</Label>
-                  <Input
-                    id="heliusApiKey"
-                    type="password"
-                    value={monitoringConfig.heliusApiKey}
-                    onChange={(e) => setMonitoringConfig(prev => ({ ...prev, heliusApiKey: e.target.value }))}
-                    className="mt-1 bg-black/20 border-white/20 text-white"
-                    placeholder="Your Helius API key"
-                  />
+                  <Badge variant={isMonitoring ? "default" : "destructive"}>
+                    {isMonitoring ? "Active" : "Disabled"}
+                  </Badge>
                 </div>
               </div>
               
-              <Button onClick={updateMonitoringConfig} className="w-full">
-                <Settings className="w-4 h-4 mr-2" />
-                Update Monitoring Config
+              {adminStats?.monitoring && (
+                <>
+                  <Separator className="bg-white/10" />
+                  
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-300">Polling Interval</span>
+                      <span className="text-white">
+                        {adminStats.monitoring.currentInterval}s
+                      </span>
+                    </div>
+                    
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-300">Current Cost</span>
+                      <span className="text-green-400 font-semibold">
+                        {adminStats.monitoring.currentCost} credits/hour
+                      </span>
+                    </div>
+                    
+                    {adminStats.monitoring.lastTrade && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-300">Last Trade</span>
+                        <span className="text-sm text-gray-400">
+                          {new Date(adminStats.monitoring.lastTrade).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {adminStats.monitoring.consecutiveErrors > 0 && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-300">Consecutive Errors</span>
+                        <Badge variant="destructive">
+                          {adminStats.monitoring.consecutiveErrors}
+                        </Badge>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+              
+              <Button 
+                onClick={toggleMonitoring} 
+                disabled={isLoading}
+                className="w-full"
+                variant={isMonitoring ? "destructive" : "default"}
+              >
+                {isMonitoring ? (
+                  <>
+                    <Pause className="w-4 h-4 mr-2" />
+                    Stop Monitoring
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 mr-2" />
+                    Start Monitoring
+                  </>
+                )}
               </Button>
             </div>
           </Card>
+
+          {/* Architecture Info */}
+          <Card className="border-white/20 p-6 bg-black/20 backdrop-blur-md">
+            <div className="flex items-center gap-3 mb-4">
+              <Database className="w-6 h-6 text-purple-400" />
+              <h2 className="text-xl font-semibold text-white">Architecture</h2>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <CheckCircle className="w-5 h-5 text-green-400" />
+                  <span className="text-green-400 font-medium">Separate Services</span>
+                </div>
+                <ul className="text-sm text-gray-300 space-y-2">
+                  <li className="flex items-center gap-2">
+                    <TrendingDown className="w-4 h-4 text-green-400" />
+                    Reduced Vercel resource usage
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Server className="w-4 h-4 text-blue-400" />
+                    Independent service scaling
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-yellow-400" />
+                    Better fault isolation
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-purple-400" />
+                    Improved monitoring
+                  </li>
+                </ul>
+              </div>
+              
+              {healthStatus && (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-300">Environment</span>
+                    <span className="text-sm text-gray-400">
+                      {healthStatus.environment.nodeEnv}
+                    </span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-300">Instance ID</span>
+                    <span className="text-sm text-gray-400">
+                      {healthStatus.instanceId}
+                    </span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-300">Redis Available</span>
+                    <Badge variant={healthStatus.environment.redisAvailable ? "default" : "secondary"}>
+                      {healthStatus.environment.redisAvailable ? "Yes" : "No"}
+                    </Badge>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Card>
+
         </div>
       </div>
     </div>

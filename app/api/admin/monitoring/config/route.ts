@@ -1,18 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { ProductionGlobalTimerService } from '@/lib/global-timer-service-prod'
-
-const globalTimer = ProductionGlobalTimerService.getInstance()
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     
-    // Update monitoring configuration
-    await globalTimer.updateMonitoringConfig(body)
+    // In the separate services architecture, monitoring configuration
+    // is handled by environment variables and service restarts
+    // This endpoint now returns a message explaining the limitation
     
     return NextResponse.json({
-      success: true,
-      message: 'Monitoring configuration updated successfully'
+      success: false,
+      error: 'Monitoring configuration changes require environment variable updates and service restarts in the separate services architecture. Please update your environment variables and restart the services.',
+      availableSettings: {
+        tokenAddress: 'TOKEN_ADDRESS',
+        heliusApiKey: 'HELIUS_API_KEY',
+        webhookMode: 'HELIUS_WEBHOOK_MODE',
+        webhookUrl: 'HELIUS_WEBHOOK_URL'
+      }
     })
   } catch (error) {
     console.error('Error updating monitoring config:', error)

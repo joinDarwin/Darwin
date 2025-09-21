@@ -1,16 +1,27 @@
 import { NextResponse } from 'next/server'
-import { ProductionGlobalTimerService } from '@/lib/global-timer-service-prod'
 
-const globalTimer = ProductionGlobalTimerService.getInstance()
+const SOLANA_MONITOR_SERVICE_URL = process.env.SOLANA_MONITOR_SERVICE_URL || 'http://localhost:3001'
 
 export async function GET() {
   try {
-    // Get monitoring stats from the timer service
-    const stats = await globalTimer.getMonitoringStats()
+    // Get monitoring stats from the Solana monitor service
+    const response = await fetch(`${SOLANA_MONITOR_SERVICE_URL}/api/monitor/stats`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      signal: AbortSignal.timeout(5000)
+    })
+
+    if (!response.ok) {
+      throw new Error(`Monitor service responded with status: ${response.status}`)
+    }
+
+    const data = await response.json()
     
     return NextResponse.json({
       success: true,
-      data: stats
+      data: data.data || data
     })
   } catch (error) {
     console.error('Error getting monitoring stats:', error)

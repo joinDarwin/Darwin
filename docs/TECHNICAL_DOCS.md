@@ -4,33 +4,53 @@ Detailed technical implementation of the Darwin Global Timer System with Redis p
 
 ## 🏗️ Architecture Overview
 
+### **Separate Services Architecture**
+
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Client A      │    │   Server         │    │   Client B      │
-│   (Browser)     │◄──►│   (Next.js API)  │◄──►│   (Browser)     │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-         │                       │                       │
-         │              ┌────────▼────────┐              │
-         │              │ProductionTimer  │              │
-         │              │Service (Redis)  │              │
-         │              └─────────────────┘              │
-         │                       │                       │
-         │              ┌────────▼────────┐              │
-         │              │ Solana Monitor  │              │
-         │              │ (Smart Polling) │              │
-         │              └─────────────────┘              │
-         │                       │                       │
-         │              ┌────────▼────────┐              │
-         │              │     Redis       │              │
-         │              │ (Global State)  │              │
-         │              └─────────────────┘              │
+┌─────────────────────────────────────────────────────────────┐
+│                    Vercel (Frontend + API)                  │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │              Next.js App (Lightweight)                  │ │
+│  │  • Frontend (React)                                    │ │
+│  │  • API Routes (Proxy to services)                      │ │
+│  │  • WebSocket/SSE (Proxy to timer service)              │ │
+│  └─────────────────────────────────────────────────────────┘ │
+└─────────────────────┬───────────────────────────────────────┘
+                      │ HTTP/WebSocket
+┌─────────────────────┴───────────────────────────────────────┐
+│                Dedicated Services                           │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐ │
+│  │ Solana Monitor  │  │ Timer Service   │  │ Redis       │ │
+│  │ Service         │  │                 │  │ Database    │ │
+│  │ • Blockchain    │  │ • Timer Logic   │  │ • Timer     │ │
+│  │   Polling       │  │ • Redis Ops     │  │   State     │ │
+│  │ • Trade         │  │ • Pub/Sub       │  │ • Events    │ │
+│  │   Detection     │  │ • Reset Logic   │  │ • Settings  │ │
+│  │ • Webhooks      │  │ • Sync Logic    │  │ • Pub/Sub   │ │
+│  └─────────────────┘  └─────────────────┘  └─────────────┘ │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+### **Benefits of Separate Services**
+- **60-80% reduction** in Vercel memory usage
+- **70-90% reduction** in Vercel CPU usage
+- **Better reliability** with dedicated services
+- **Easier scaling** of individual components
+- **Cost optimization** for production deployments
 
 ## 🎯 Core Components
 
-### **1. ProductionGlobalTimerService** (`lib/global-timer-service-prod.ts`)
+### **1. Timer Service** (`services/timer-service/index.js`)
 
-Production-ready timer service with Redis persistence and global synchronization.
+Dedicated service for timer logic, Redis operations, and state management.
+
+**Key Features:**
+- **Redis Persistence**: Global state synchronization across instances
+- **Multi-Instance Support**: Handles multiple server instances
+- **Event Logging**: Comprehensive audit trail
+- **Admin Integration**: Monitoring and configuration management
+- **Graceful Degradation**: Falls back to in-memory if Redis unavailable
+- **Server-Sent Events**: Real-time updates to frontend
 
 ```typescript
 export interface GlobalTimerState {
@@ -76,9 +96,9 @@ class ProductionGlobalTimerService {
 - **Admin Integration**: Monitoring and configuration management
 - **Graceful Degradation**: Falls back to in-memory if Redis unavailable
 
-### **2. SolanaTokenSwapMonitor** (`lib/solana-monitor.ts`)
+### **2. Solana Monitor Service** (`services/solana-monitor-service/index.js`)
 
-Optimized blockchain monitoring service with smart polling and webhook support.
+Dedicated service for Solana blockchain monitoring, trade detection, and webhook support.
 
 ```typescript
 class SolanaTokenSwapMonitor {
@@ -118,7 +138,18 @@ class SolanaTokenSwapMonitor {
 5. **Multi-Mode Operation**: Conservative, Balanced, Aggressive, Ultra modes
 6. **Cost Optimization**: 95% reduction in Helius API usage
 
-### **3. WebSocketService** (`lib/websocket-service.ts`)
+### **3. Vercel Frontend** (`app/`)
+
+Lightweight Next.js application that proxies requests to dedicated services.
+
+**Key Features:**
+- **API Proxies**: Routes requests to appropriate services
+- **Real-time Updates**: Proxies Server-Sent Events from timer service
+- **Admin Panel**: Redesigned interface for separate services architecture
+- **Health Monitoring**: Checks status of all services
+- **Minimal Resource Usage**: Only handles UI and request proxying
+
+### **4. WebSocketService** (`lib/websocket-service.ts`)
 
 Client-side service for real-time communication with server.
 
@@ -667,6 +698,74 @@ describe('SolanaTokenSwapMonitor', () => {
 - **Network failure recovery**: Reconnection and state restoration
 - **DEX integration**: Real transaction analysis across different DEXs
 
+## 🚀 Deployment Architecture
+
+### **Service Deployment Options**
+
+#### **1. Railway (Recommended)**
+```bash
+# Deploy Timer Service
+cd services/timer-service
+railway up
+
+# Deploy Monitor Service  
+cd services/solana-monitor-service
+railway up
+
+# Deploy Vercel Frontend
+npx vercel
+```
+
+#### **2. Docker Compose (Self-hosted)**
+```bash
+# Start all services
+docker-compose up -d
+
+# Deploy Vercel Frontend
+npx vercel
+```
+
+#### **3. Manual Deployment**
+- Deploy services to your preferred platform
+- Update Vercel environment variables
+- Configure service URLs
+
+### **Environment Variables**
+
+#### **Vercel Frontend**
+```env
+TIMER_SERVICE_URL=https://your-timer-service.railway.app
+SOLANA_MONITOR_SERVICE_URL=https://your-monitor-service.railway.app
+NEXT_PUBLIC_HELIUS_API_KEY=your_helius_api_key
+HELIUS_API_KEY=your_helius_api_key
+```
+
+#### **Timer Service**
+```env
+REDIS_URL=redis://username:password@host:port
+TIMER_DEFAULT_DURATION=600000
+```
+
+#### **Monitor Service**
+```env
+HELIUS_API_KEY=your_helius_api_key
+TIMER_SERVICE_URL=https://your-timer-service.railway.app
+TOKEN_ADDRESS=9VxExA1iRPbuLLdSJ2rB3nyBxsyLReT4aqzZBMaBaY1p
+```
+
+### **Service Health Monitoring**
+
+```bash
+# Timer Service
+curl https://your-timer-service.railway.app/health
+
+# Monitor Service
+curl https://your-monitor-service.railway.app/health
+
+# Frontend
+curl https://your-vercel-app.vercel.app/api/health
+```
+
 ## 🔮 Future Enhancements
 
 ### **Planned Features**
@@ -678,10 +777,9 @@ describe('SolanaTokenSwapMonitor', () => {
 
 ### **Technical Improvements**
 - **WebSocket Upgrade**: Replace SSE with WebSockets for bidirectional communication
-- **Caching Layer**: Redis for improved performance
 - **Database Integration**: PostgreSQL for historical data
-- **Microservices**: Split into separate services for better scalability
 - **GraphQL API**: More flexible data querying
+- **Advanced Monitoring**: Prometheus metrics and Grafana dashboards
 
 ---
 

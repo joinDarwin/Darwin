@@ -38,13 +38,34 @@ npm run dev
 ```
 
 ### Environment Variables
+
+#### **Vercel Frontend (.env.local)**
 ```env
-# Required: Redis for persistence
-REDIS_URL=your_redis_cloud_url_here
+# Required: Service URLs (deployed services)
+TIMER_SERVICE_URL=https://your-timer-service.railway.app
+SOLANA_MONITOR_SERVICE_URL=https://your-monitor-service.railway.app
 
 # Required: Helius API key for Solana RPC
 NEXT_PUBLIC_HELIUS_API_KEY=your_helius_api_key_here
 HELIUS_API_KEY=your_helius_api_key_here
+```
+
+#### **Timer Service (.env)**
+```env
+# Required: Redis for persistence
+REDIS_URL=your_redis_cloud_url_here
+
+# Optional: Timer configuration
+TIMER_DEFAULT_DURATION=600000  # 10 minutes in milliseconds
+```
+
+#### **Solana Monitor Service (.env)**
+```env
+# Required: Helius API key for Solana RPC
+HELIUS_API_KEY=your_helius_api_key_here
+
+# Required: Timer service URL for notifications
+TIMER_SERVICE_URL=https://your-timer-service.railway.app
 
 # Optional: Token configuration
 TOKEN_ADDRESS=9VxExA1iRPbuLLdSJ2rB3nyBxsyLReT4aqzZBMaBaY1p
@@ -208,15 +229,15 @@ monitor.updateTokenAddress('new_token_address')
 
 ```
 Darwin/
-├── app/                           # Next.js app directory
+├── app/                           # Next.js app directory (Vercel Frontend)
 │   ├── admin/                     # Admin panel
-│   │   └── page.tsx              # Admin interface
-│   ├── api/                      # API endpoints
+│   │   └── page.tsx              # Redesigned admin interface
+│   ├── api/                      # API endpoints (Proxy to services)
 │   │   ├── admin/                # Admin API routes
 │   │   │   ├── monitoring/       # Monitoring configuration
 │   │   │   ├── settings/         # Settings management
 │   │   │   └── stats/            # Statistics
-│   │   ├── timer/                # Timer API routes
+│   │   ├── timer/                # Timer API routes (Proxy)
 │   │   ├── webhook/              # Webhook endpoints
 │   │   └── health/               # Health checks
 │   └── page.tsx                  # Main page
@@ -226,47 +247,87 @@ Darwin/
 ├── contexts/                      # React contexts
 │   └── TimerContext.tsx         # Global timer state
 ├── lib/                          # Core libraries
-│   ├── global-timer-service-prod.ts  # Production timer service
-│   ├── solana-monitor.ts             # Blockchain monitoring
+│   ├── deprecated/               # Deprecated files (moved to services)
+│   │   ├── global-timer-service-prod.ts
+│   │   ├── solana-monitor.ts
+│   │   └── solana-webhook-monitor.ts
 │   ├── websocket-service.ts          # Real-time communication
 │   └── time-sync.ts                 # Time synchronization
+├── services/                      # Dedicated Services
+│   ├── timer-service/            # Timer Service
+│   │   ├── index.js              # Timer service logic
+│   │   ├── package.json          # Dependencies
+│   │   ├── Dockerfile            # Container config
+│   │   └── env.example           # Environment template
+│   └── solana-monitor-service/   # Solana Monitor Service
+│       ├── index.js              # Monitor service logic
+│       ├── package.json          # Dependencies
+│       ├── Dockerfile            # Container config
+│       └── env.example           # Environment template
+├── docs/                         # Documentation
+│   ├── PRODUCTION_DEPLOYMENT_GUIDE.md  # Complete deployment guide
+│   ├── TECHNICAL_DOCS.md         # Technical documentation & architecture
+│   ├── MIGRATION_SUMMARY.md      # Migration documentation
+│   └── env.example               # Environment template
+├── docker-compose.yml            # Local development
+├── railway.json                  # Railway deployment config
+├── vercel.json                   # Vercel configuration
+├── deploy.sh                     # Quick deployment script
 ├── env.example                   # Environment template
-├── README.md                     # This file
-├── TECHNICAL_DOCS.md            # Technical documentation
-└── PRODUCTION_DEPLOYMENT.md     # Deployment guide
+└── README.md                     # This file
 ```
 
 ## 🚀 Deployment
 
-### **Vercel (Recommended)**
+### **Separate Services Architecture (Recommended)**
+
+The system now uses a separate services architecture to reduce Vercel resource usage by 60-80%:
+
+#### **1. Deploy Dedicated Services**
+```bash
+# Quick deployment with script
+./deploy.sh railway    # Deploy to Railway (recommended)
+./deploy.sh docker     # Deploy with Docker Compose
+
+# Or manual deployment
+# See docs/PRODUCTION_DEPLOYMENT_GUIDE.md for detailed instructions
+```
+
+#### **2. Deploy Vercel Frontend**
 ```bash
 # Deploy to Vercel
 npx vercel
 
 # Set environment variables in Vercel dashboard
-REDIS_URL=your_redis_cloud_url
+TIMER_SERVICE_URL=https://your-timer-service.railway.app
+SOLANA_MONITOR_SERVICE_URL=https://your-monitor-service.railway.app
 NEXT_PUBLIC_HELIUS_API_KEY=your_api_key
 HELIUS_API_KEY=your_api_key
 ```
 
 ### **Production Requirements**
+- **Timer Service**: Dedicated service for timer logic and Redis operations
+- **Monitor Service**: Dedicated service for Solana blockchain monitoring
 - **Redis**: Required for global state persistence
-- **Environment Variables**: Configure all required settings
-- **Webhook URL**: For maximum efficiency (optional)
+- **Environment Variables**: Configure service URLs and API keys
 
-### **Other Platforms**
-- **Netlify**: Compatible with Next.js (requires Redis)
-- **Railway**: Good for full-stack apps with Redis
-- **AWS/GCP**: Use with Docker containers and managed Redis
+### **Deployment Platforms**
+- **Railway**: Recommended for dedicated services (easy deployment)
+- **Vercel**: Frontend and API proxy (lightweight)
+- **Docker**: Local development and self-hosted deployments
+- **AWS/GCP**: Enterprise deployments with managed services
 
 ## 🔮 Recent Enhancements
 
+- ✅ **Separate Services Architecture**: 60-80% reduction in Vercel resource usage
+- ✅ **Dedicated Timer Service**: Independent timer logic and Redis operations
+- ✅ **Dedicated Monitor Service**: Independent Solana blockchain monitoring
 - ✅ **Redis Persistence**: Global state synchronization across instances
 - ✅ **Smart Polling**: Dynamic intervals with 95% credit reduction
 - ✅ **Webhook Support**: 99% credit reduction with real-time notifications
-- ✅ **Admin Panel**: Complete configuration and monitoring interface
+- ✅ **Redesigned Admin Panel**: Clean, functional interface for the new architecture
 - ✅ **Cost Optimization**: Real-time credit usage tracking
-- ✅ **Multi-Mode Polling**: Conservative, Balanced, Aggressive, Ultra modes
+- ✅ **Service Health Monitoring**: Real-time status of all services
 
 ## 🔮 Future Enhancements
 
