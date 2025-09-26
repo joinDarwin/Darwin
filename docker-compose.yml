@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # Redis Database
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Timer Service
+  timer-service:
+    build: ./services/timer-service
+    ports:
+      - "3002:3002"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - REDIS_KEY_PREFIX=darwin-timer
+      - TIMER_DEFAULT_DURATION=600000
+      - TIMER_UPDATE_INTERVAL=1000
+      - PORT=3002
+      - INSTANCE_ID=timer-service-1
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Solana Monitor Service
+  solana-monitor-service:
+    build: ./services/solana-monitor-service
+    ports:
+      - "3001:3001"
+    environment:
+      - HELIUS_API_KEY=${HELIUS_API_KEY}
+      - NEXT_PUBLIC_HELIUS_API_KEY=${HELIUS_API_KEY}
+      - TOKEN_ADDRESS=${TOKEN_ADDRESS:-9VxExA1iRPbuLLdSJ2rB3nyBxsyLReT4aqzZBMaBaY1p}
+      - SOLANA_POLLING_INTERVAL=60000
+      - HELIUS_WEBHOOK_MODE=${HELIUS_WEBHOOK_MODE:-false}
+      - HELIUS_WEBHOOK_URL=${HELIUS_WEBHOOK_URL}
+      - PORT=3001
+      - INSTANCE_ID=solana-monitor-1
+      - TIMER_SERVICE_URL=http://timer-service:3002
+    depends_on:
+      timer-service:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis_data:

@@ -1,18 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// In-memory monitoring state (in production, use a database)
-let monitoringState = {
-  enabled: true
-}
+// External service URLs - these should be set in environment variables
+const SOLANA_MONITOR_SERVICE_URL = process.env.SOLANA_MONITOR_SERVICE_URL || 'http://localhost:3001'
 
 export async function GET(request: NextRequest) {
   try {
-    return NextResponse.json({
-      success: true,
-      data: monitoringState
+    // Forward request to Solana monitor service
+    const response = await fetch(`${SOLANA_MONITOR_SERVICE_URL}/api/monitor/stats`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      signal: AbortSignal.timeout(5000)
     })
+
+    if (!response.ok) {
+      throw new Error(`Monitor service responded with status: ${response.status}`)
+    }
+
+    const data = await response.json()
+    return NextResponse.json(data)
   } catch (error) {
-    console.error('Error fetching monitoring state:', error)
+    console.error('Error getting monitoring state from service:', error)
     return NextResponse.json({
       success: false,
       error: 'Failed to fetch monitoring state'
@@ -25,18 +34,25 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     
     if (typeof body.enabled === 'boolean') {
-      monitoringState.enabled = body.enabled
-      
-      // In production, you'd want to:
-      // 1. Start/stop the Solana monitoring service
-      // 2. Update the monitoring state in the database
-      // 3. Notify connected clients about the change
-      
-      console.log('Monitoring state updated:', monitoringState)
-      
+      // Forward request to Solana monitor service
+      const action = body.enabled ? 'start' : 'stop'
+      const response = await fetch(`${SOLANA_MONITOR_SERVICE_URL}/api/monitor/${action}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+        signal: AbortSignal.timeout(5000)
+      })
+
+      if (!response.ok) {
+        throw new Error(`Monitor service responded with status: ${response.status}`)
+      }
+
+      const data = await response.json()
       return NextResponse.json({
         success: true,
-        data: monitoringState,
+        data: { enabled: body.enabled },
         message: `Monitoring ${body.enabled ? 'enabled' : 'disabled'} successfully`
       })
     } else {

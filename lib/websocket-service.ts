@@ -1,10 +1,11 @@
 export interface TimerSyncMessage {
-  type: 'initial' | 'update' | 'timer_reset' | 'ping'
+  type: 'initial' | 'update' | 'timer_reset' | 'ping' | 'error'
   timestamp: number
   data?: any
   clientId?: string
   timeLeft?: number
   lastSwapTime?: number
+  message?: string
 }
 
 export class WebSocketService {

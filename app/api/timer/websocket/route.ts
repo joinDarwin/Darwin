@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
-import { ProductionGlobalTimerService } from '@/lib/global-timer-service-prod'
 
-const globalTimer = ProductionGlobalTimerService.getInstance()
+// External service URLs - these should be set in environment variables
+const TIMER_SERVICE_URL = process.env.TIMER_SERVICE_URL || 'http://localhost:3002'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -11,29 +11,85 @@ export async function GET(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder()
-      let unsubscribe: (() => void) | null = null
+      let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
       let pingInterval: NodeJS.Timeout | null = null
       
       try {
-        // Send initial state
-        const initialState = await globalTimer.getCurrentState()
-        const initialData = `data: ${JSON.stringify({
-          type: 'initial',
-          data: initialState,
-          clientId
-        })}\n\n`
-        controller.enqueue(encoder.encode(initialData))
-
-        // Subscribe to timer updates
-        unsubscribe = globalTimer.subscribe((state) => {
-          const data = `data: ${JSON.stringify({
-            type: 'update',
-            data: state,
-            clientId,
-            timestamp: Date.now()
-          })}\n\n`
-          controller.enqueue(encoder.encode(data))
+        // Get initial state from timer service
+        const response = await fetch(`${TIMER_SERVICE_URL}/api/timer/state`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          signal: AbortSignal.timeout(5000)
         })
+
+        if (response.ok) {
+          const initialState = await response.json()
+          const initialData = `data: ${JSON.stringify({
+            type: 'initial',
+            data: initialState.data,
+            clientId
+          })}\n\n`
+          controller.enqueue(encoder.encode(initialData))
+        }
+
+        // Connect to timer service SSE stream using fetch
+        const sseResponse = await fetch(`${TIMER_SERVICE_URL}/api/timer/stream`, {
+          headers: {
+            'Accept': 'text/event-stream',
+            'Cache-Control': 'no-cache'
+          }
+        })
+
+        if (!sseResponse.ok) {
+          throw new Error(`Timer service SSE responded with status: ${sseResponse.status}`)
+        }
+
+        reader = sseResponse.body?.getReader() || null
+        if (!reader) {
+          throw new Error('No reader available from timer service SSE')
+        }
+
+        // Read SSE stream
+        const readStream = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              
+              const chunk = new TextDecoder().decode(value)
+              const lines = chunk.split('\n')
+              
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  try {
+                    const message = JSON.parse(line.slice(6))
+                    const data = `data: ${JSON.stringify({
+                      ...message,
+                      clientId,
+                      timestamp: Date.now()
+                    })}\n\n`
+                    controller.enqueue(encoder.encode(data))
+                  } catch (error) {
+                    console.error('Error parsing SSE message:', error)
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error reading SSE stream:', error)
+            const errorData = `data: ${JSON.stringify({
+              type: 'error',
+              message: 'Connection to timer service lost',
+              clientId,
+              timestamp: Date.now()
+            })}\n\n`
+            controller.enqueue(encoder.encode(errorData))
+          }
+        }
+
+        readStream()
 
         // Keep connection alive with periodic pings
         pingInterval = setInterval(() => {
@@ -46,8 +102,8 @@ export async function GET(request: NextRequest) {
 
         // Handle client disconnect
         request.signal.addEventListener('abort', () => {
-          if (unsubscribe) {
-            unsubscribe()
+          if (reader) {
+            reader.cancel()
           }
           if (pingInterval) {
             clearInterval(pingInterval)

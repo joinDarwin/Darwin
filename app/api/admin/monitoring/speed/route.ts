@@ -1,7 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { ProductionGlobalTimerService } from '@/lib/global-timer-service-prod'
-
-const globalTimer = ProductionGlobalTimerService.getInstance()
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,12 +12,16 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    // Set polling speed
-    await globalTimer.setPollingSpeed(mode)
+    // In the separate services architecture, polling speed is handled
+    // by the Solana monitor service and cannot be changed dynamically
+    // This endpoint now returns a message explaining the limitation
     
     return NextResponse.json({
-      success: true,
-      message: `Polling speed set to ${mode} mode`
+      success: false,
+      error: 'Polling speed changes require service restart in the separate services architecture. The Solana monitor service uses a fixed 3-second polling interval.',
+      currentMode: 'balanced',
+      availableModes: ['conservative', 'balanced', 'aggressive', 'ultra'],
+      note: 'To change polling speed, modify the service configuration and restart the Solana monitor service.'
     })
   } catch (error) {
     console.error('Error setting polling speed:', error)

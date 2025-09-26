@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
-import { ProductionGlobalTimerService } from '@/lib/global-timer-service-prod'
+
+const TIMER_SERVICE_URL = process.env.TIMER_SERVICE_URL || 'http://localhost:3002'
+const SOLANA_MONITOR_SERVICE_URL = process.env.SOLANA_MONITOR_SERVICE_URL || 'http://localhost:3001'
 
 export async function GET() {
   const health = {
@@ -8,35 +10,78 @@ export async function GET() {
     instanceId: process.env.INSTANCE_ID || 'unknown',
     services: {
       timer: await checkTimerService(),
+      monitor: await checkMonitorService(),
       redis: await checkRedis(),
       solana: await checkSolanaRPC()
     },
     environment: {
       nodeEnv: process.env.NODE_ENV,
       redisAvailable: !!process.env.REDIS_URL,
-      heliusApiKey: !!process.env.HELIUS_API_KEY
+      heliusApiKey: !!process.env.HELIUS_API_KEY,
+      architecture: 'separate-services'
     }
   }
 
   // Determine overall health status
-  const allServicesHealthy = Object.values(health.services).every(service => service.status === 'healthy')
-  health.status = allServicesHealthy ? 'healthy' : 'degraded'
+  const criticalServices = [health.services.timer, health.services.monitor]
+  const allCriticalHealthy = criticalServices.every(service => service.status === 'healthy')
+  health.status = allCriticalHealthy ? 'healthy' : 'degraded'
 
-  const statusCode = allServicesHealthy ? 200 : 503
+  const statusCode = allCriticalHealthy ? 200 : 503
 
   return NextResponse.json(health, { status: statusCode })
 }
 
 async function checkTimerService() {
   try {
-    const timerService = ProductionGlobalTimerService.getInstance()
-    const state = await timerService.getCurrentState()
-    
+    const response = await fetch(`${TIMER_SERVICE_URL}/health`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(5000)
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      return {
+        status: 'healthy',
+        url: TIMER_SERVICE_URL,
+        instanceId: data.instanceId,
+        redisAvailable: data.redisAvailable
+      }
+    } else {
+      return {
+        status: 'unhealthy',
+        error: `HTTP ${response.status}: ${response.statusText}`
+      }
+    }
+  } catch (error) {
     return {
-      status: 'healthy',
-      timeLeft: Math.max(0, state.duration - (Date.now() - state.startTime)),
-      isActive: state.isActive,
-      lastReset: state.lastSwapTime
+      status: 'unhealthy',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }
+  }
+}
+
+async function checkMonitorService() {
+  try {
+    const response = await fetch(`${SOLANA_MONITOR_SERVICE_URL}/health`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(5000)
+    })
+
+    if (response.ok) {
+      const data = await response.json()
+      return {
+        status: 'healthy',
+        url: SOLANA_MONITOR_SERVICE_URL,
+        tokenAddress: data.tokenAddress,
+        isMonitoring: data.isMonitoring,
+        webhookMode: data.webhookMode
+      }
+    } else {
+      return {
+        status: 'unhealthy',
+        error: `HTTP ${response.status}: ${response.statusText}`
+      }
     }
   } catch (error) {
     return {

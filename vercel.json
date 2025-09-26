@@ -1,0 +1,17 @@
+{
+  "functions": {
+    "app/api/timer/route.ts": {
+      "maxDuration": 10
+    },
+    "app/api/timer/websocket/route.ts": {
+      "maxDuration": 30
+    },
+    "app/api/admin/monitoring/route.ts": {
+      "maxDuration": 10
+    }
+  },
+  "env": {
+    "TIMER_SERVICE_URL": "@timer-service-url",
+    "SOLANA_MONITOR_SERVICE_URL": "@solana-monitor-service-url"
+  }
+}

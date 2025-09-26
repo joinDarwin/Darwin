@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Clock, Wifi, WifiOff, RotateCcw, Bug, Settings } from 'lucide-react'
 import { useTimer } from '@/contexts/TimerContext'
 import { getTimeSynchronizer } from '@/lib/time-sync'
-import { SolanaTokenSwapMonitor } from '@/lib/solana-monitor'
 
 export function VaultTimer() {
   const { timeLeft, isActive, lastTrade, resetTimer } = useTimer()
@@ -45,17 +44,31 @@ export function VaultTimer() {
 
   const { hours, minutes, seconds } = formatTime(timeLeft)
 
-  // Debug function to check recent transactions
+  // Debug function to check recent transactions (now calls the dedicated service)
   const debugRecentTransactions = async () => {
     console.log('🔍 Starting debug check...')
-    const monitor = new SolanaTokenSwapMonitor()
-    await monitor.debugRecentTransactions(5)
+    try {
+      const response = await fetch('/api/admin/monitoring')
+      const data = await response.json()
+      console.log('📊 Monitor service stats:', data)
+    } catch (error) {
+      console.error('❌ Error getting monitor stats:', error)
+    }
   }
 
   const debugSpecificTransaction = async () => {
-    console.log('🔍 Analyzing specific transaction...')
-    const monitor = new SolanaTokenSwapMonitor()
-    await monitor.debugSpecificTransaction('MXSceriLN6vGwFYuDqxZuQJCKjsiGFkJyk2iahvLuSiFLBTHEqNJ9asmXkEW6vPRyQPY999ZEEUtsRDEf3jUdbq')
+    console.log('🔍 Testing timer reset...')
+    try {
+      const response = await fetch('/api/timer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reset' })
+      })
+      const data = await response.json()
+      console.log('✅ Timer reset response:', data)
+    } catch (error) {
+      console.error('❌ Error resetting timer:', error)
+    }
   }
 
   return (
@@ -135,7 +148,7 @@ export function VaultTimer() {
             className="text-xs border-red-400/50 text-red-400 hover:bg-red-400/10 hover:border-red-400"
           >
             <Bug className="w-3 h-3 mr-1" />
-            Test TX
+            Test Reset
           </Button>
           <Button
             onClick={() => window.open('/admin', '_blank')}
